@@ -2,11 +2,18 @@
 library(dplyr)
 library(tidyr)
 library(purrr)
+library(psych)
 
-birth <- read.csv("data/births.csv")
-names(birth)
+#birth <- read.csv("data/births.csv")
 
-test <- birth %>%
+births_2013 <- read.csv("/Users/brenna/Downloads/STATA Ready Excel-selected/STATA Ready births 2013+.csv")
+births_2016 <- read.csv("/Users/brenna/Downloads/STATA Ready Excel-selected/STATA Ready births 2016+.csv")
+
+births <- rbind(births_2013, births_2016)
+
+names(births)
+
+test <- births %>%
   mutate(MomRaceAmIndian = ifelse(MomRaceAmIndian == "", NA, "aian")) %>%
   mutate(MomRaceWhite = ifelse(MomRaceWhite == "", NA, "white")) %>%
   mutate(MomRaceBlack = ifelse(MomRaceBlack == "", NA, "black")) %>%
@@ -25,7 +32,7 @@ test <- birth %>%
   mutate(MomRaceOther = ifelse(MomRaceOther == "", NA, "other")) %>%
   mutate(MomRaceUnknown = ifelse(MomRaceUnknown == "", NA, "unknown"))
 
-names(test) <- tolower(names(test))
+#names(test) <- tolower(names(test))
 
 table(test$MomRaceOtherSpec1)
 table(test$MomRaceOtherSpec2)
@@ -46,47 +53,152 @@ x <- unite(test, col = "mom_race", c("MomRaceAmIndian", "MomRaceWhite", "MomRace
 x$mom_race <- gsub("NA ", "", x$mom_race)
 x$mom_race <- gsub(" NA", "", x$mom_race)
 
+table(x$mom_race == "NA")
 
-asian_races <- c("\\chinese\\b", "\\japanese\\b", "\\filipino\\b", "\\korean\\b", 
-                 "\\vietnamese\\b", "\\other_asian\\b", "\\asian_indian\\b")
-nhpi_races <- c("guamanian", "hawaiian", "samoan", "tongan", 
-                "pac_islander")
-
-non_asian_races <- c("guamanian", "hawaiian", "samoan", "tongan", "pac_islander", "white",
-                     "black", "unknown", "aian", "other")
+check <- x[which(x$mom_race == "NA"), ] # fix em
 
 all_races <- c("chinese", "japanese", "filipino", "korean", "vietnamese", "other_asian", "asian_indian",
                "guamanian", "hawaiian", "samoan", "tongan", "pac_islander", "white",
                "black", "unknown", "aian", "other")
+# source: https://www.census.gov/quickfacts/fact/note/US/RHI625222#:~:text=OMB%20requires%20five%20minimum%20categories,report%20more%20than%20one%20race.
+asian_races <- c("chinese", "japanese", "filipino", "korean", 
+                 "vietnamese", "other_asian", "asian_indian")
+nhpi_races <- c("guamanian", "hawaiian", "samoan", "tongan", 
+                "pac_islander")
+non_asian_races <- setdiff(all_races, asian_races)
+non_nhpi_races  <- setdiff(all_races, nhpi_races)
+
 
 table(grepl(asian_races, x$mom_race) & !grepl("white", x$mom_race))
 
-check <- x[which(x$mom_race %in% grep(paste(asian_races, collapse="|"), 
-             x$mom_race, value=TRUE) &
-          !x$mom_race %in% grep(paste(non_asian_races, collapse="|"), 
-                                 x$mom_race, value=TRUE)), ]
+x$multiple_same <- case_when(x$mom_race %in% grep(paste(asian_races, collapse="|"), 
+                                               x$mom_race, value=TRUE) &
+                            !x$mom_race %in% grep(paste(non_asian_races, collapse="|"), 
+                                                  x$mom_race, value=TRUE) ~ "multiple_asian",
+                            x$mom_race %in% grep(paste(nhpi_races, collapse="|"), 
+                                                 x$mom_race, value=TRUE) &
+                              !x$mom_race %in% grep(paste(non_nhpi_races, collapse="|"), 
+                                                    x$mom_race, value=TRUE) ~ "multiple_nhpi")
 
-table(check$mom_race)
+x$multiple_same <- ifelse(grepl(" ", x$mom_race), x$multiple_same, NA)
 
-matches <- grep(paste(asian_races, collapse="|"), 
-                        x$mom_race, value=TRUE) &
-  !grep(paste(non_asian_races, collapse="|"), 
-        x$mom_race, value=TRUE)
+#table(x$multiple_same)
 
-matches
-
-table(grepl("chinese | japanese | filipino | korean | vietnamese | asian_indian | other_asian", x$mom_race),
-      grepl("guamanian | hawaiian | samoan | tongan | pac_islander | aian | black | multiple races"))
+table(x$mom_race, x$multiple_same)
 
 x <- x %>%
-  mutate(mom_race_simple = ifelse(grepl(" ", mom_race), "multiple races", mom_race)) %>%
-  # source: https://www.census.gov/quickfacts/fact/note/US/RHI625222#:~:text=OMB%20requires%20five%20minimum%20categories,report%20more%20than%20one%20race.
-  mutate(mom_race_census = case_when(mom_race_simple %in% c("chinese", "filipino",
-                                                            "japanese", "korean",
-                                                            "vietnamese", "other_asian") ~ "asian",
-                                     mom_race_simple %in% c("guamanian", "hawaiian",
-                                                            "samoan", "tongan",
-                                                            "pac_islander")))
+  mutate(mom_race_simple = ifelse(grepl(" ", mom_race),# | grepl("multiple", multiple_same), 
+                                  "multiple_races", mom_race)) %>%
+  mutate(mom_race_simple = ifelse(!is.na(multiple_same), multiple_same,
+                                  mom_race_simple))%>%
+  mutate(mom_race_census = case_when(mom_race_simple %in% c("multiple_asian", "asian_indian",
+                                                            "chinese", "filipino", "japanese",
+                                                            "korean", "other_asian",
+                                                            "vietnamese") ~ "asian",
+                                     mom_race_simple %in% c("guamanian", "hawaiian", "samoan",
+                                                            "multiple_nhpi", "pac_islander",
+                                                            "tongan") ~ "nhpi",
+                                     mom_race_simple == "aian" ~ "aian",
+                                     mom_race_simple == "black" ~ "black",
+                                     mom_race_simple == "multiple_races" ~ "multiple_races",
+                                     mom_race_simple %in% c("other", "NA", "unknown") ~ "other",
+                                     mom_race_simple == "white" ~ "white"))
+
+table(x$mom_race_simple)
+table(x$mom_race_census)
+table(is.na(x$multiple_same), x$mom_race)
+
+round(prop.table(table(x$mom_race_census))*100, 3)
+
+names(x)
+
+table(x$MomHispanicOrigin, x$mom_race_simple)
+
+x <- x %>%
+  mutate(hispanic = ifelse(MomHispanicOrigin == 1, "hispanic", "not hispanic")) %>%
+  mutate(mom_race_ethn = ifelse(hispanic == "hispanic", "hispanic", mom_race_census))
+
+table(x$mom_race_ethn)
+names(x)
+summary(x$UnplannedOperation)
+
+
+
+# missing values often coded as *; as.numeric() will convert
+test <- as.factor(as.numeric(x$PrevPregStillborn))
+summary(test)
+table(x$TobaccoPrior) # lots of numbers
+table(x$TobaccoTrimester1) # ""
+table(x$TobaccoTrimester2) # ""
+table(x$TobaccoTrimester3) # ""
+table(x$SourceOfPayment) # ~1-9, C
+table(x$RenalOtherUrinarySpecify) # many conditions, ICD?
+table(x$PrevTerminations) # 9-28
+table(x$PrevPregStillborn) # 0-5
+table(x$PrevPregNowLiving) # 0-17
+table(x$PrevPregNowDead) # 
+table(x$PrevPregMultiple)
+table(x$OtherMuscSpecify)
+table(x$OtherLimbSpecify)
+table(x$OtherCongAnomSpecify)
+table(x$NumberVisits)
+table(x$NumberOfCSections)
+table(x$NICU)
+x$MomWeightPrior
+table(x$MomWeightGainLoss)
+table(x$MomWeightAtDelivery)
+table(x$MomHeightInches)
+table(x$MomHeightFeet)
+
+
+numeric_fx <- function(x){
+  x <- as.numeric(x)
+}
+factor_fx <- function(x){
+  x <- as.numeric(x)
+}
+
+
+x <- x %>%
+  mutate_at(vars(MomWeightPrior) = as.numeric(MomWeightPrior)) %>%
+
+
+
+table(x$MomCountryOfBirthFips)
+table(x$MomCountryOfBirth)
+table(x$MomAge)
+table(x$MalfGenSpecify)
+table(x$LimbReductionSpecify)
+table(x$IllicitDrugUseSpecify)
+
+
+
+
+
+small_dat <- 
+
+
+# birth weight
+x$BirthWeightGrams <- as.numeric(x$BirthWeightGrams)
+summary(x$BirthWeightGrams)
+
+hist(x$BirthWeightGrams)
+
+
+x$lbw <- ifelse(x$BirthWeightGrams <= 2500, "low", "not low")
+table(x$lbw)
+
+# aside: which of these are unreasonable
+v_low <- x %>%
+  filter(BirthWeightGrams < 1000)
+hist(v_low$Gestation)
+corr.test(x$BirthWeightGrams, x$Gestation)
+
+v_low[which(v_low$Gestation == 40), ]
+
+
+
+
 table(x$mom_race_simple)
 #x <- x %>%
   #mutate(case_when())
